@@ -1,6 +1,7 @@
 ---
 - set_fact:
     created_by: "{{ lookup('env', 'LOGNAME')|default(cluster, true) }}"
+    docker_vol_ephemeral: "{{ lookup('env', 'os_docker_vol_ephemeral') | default(false, true) }}"
     env: "{{ cluster }}"
     env_host_type: "{{ cluster }}-openshift-{{ type }}"
     host_type: "{{ type }}"
@@ -18,6 +19,25 @@
                         | default(deployment_vars[deployment_type].assign_public_ip, true) }}"
     security_groups: "{{ lookup('env', 'ec2_security_groups')
                       | default(deployment_vars[deployment_type].security_groups, true) }}"
+    user_data: "{{ lookup('template', '../templates/user_data.j2') if type == 'node' else None | default('omit') }}"
+    volume_defs:
+      master:
+        root:
+          volume_size: "{{ lookup('env', 'os_master_root_vol_size') | default(25, true) }}"
+          device_type: "{{ lookup('env', 'os_master_root_vol_type') | default('gp2', true) }}"
+          iops: "{{ lookup('env', 'os_master_root_vol_iops') | default(500, true) }}"
+      node:
+        root:
+          volume_size: "{{ lookup('env', 'os_node_root_vol_size') | default(25, true) }}"
+          device_type: "{{ lookup('env', 'os_node_root_vol_type') | default('gp2', true) }}"
+          iops: "{{ lookup('env', 'os_node_root_vol_iops') | default(500, true) }}"
+        docker:
+          volume_size: "{{ lookup('env', 'os_docker_vol_size') | default(32, true) }}"
+          device_type: "{{ lookup('env', 'os_docker_vol_type') | default('gp2', true) }}"
+          iops: "{{ lookup('env', 'os_docker_vol_iops') | default(500, true) }}"
+
+- set_fact:
+    volumes: "{{ volume_defs | oo_ec2_volume_definition(host_type, docker_vol_ephemeral | bool) }}"
 
 - name: Launch instance(s)
   ec2:
@@ -30,12 +50,14 @@
     count: "{{ instances | oo_len }}"
     vpc_subnet_id: "{{ machine_subnet | default(omit, true) }}"
     assign_public_ip: "{{ machine_public_ip | default(omit, true) }}"
+    user_data: "{{ user_data }}"
     wait: yes
     instance_tags:
       created-by: "{{ created_by }}"
       env: "{{ env }}"
       host-type: "{{ host_type }}"
       env-host-type: "{{ env_host_type }}"
+    volumes: "{{ volumes }}"
   register: ec2
 
 - name: Add Name tag to instances

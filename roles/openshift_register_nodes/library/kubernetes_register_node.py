@@ -105,9 +105,9 @@ class ClientConfig:
                 bool(self.config['contexts']) or
                 bool(self.config['current-context']) or
                 bool(self.config['users'])):
-            raise ClientConfigException(msg="Client config missing required " \
-                                            "values",
-                                        output=output)
+            raise ClientConfigException(
+                    "Client config missing required values: %s" % output
+            )
 
     def current_context(self):
         return self.config['current-context']
@@ -293,7 +293,9 @@ def main():
             client_context   = dict(type = 'str', default = 'default'), # TODO: needs documented
             client_namespace = dict(type = 'str', default = 'default'), # TODO: needs documented
             client_user      = dict(type = 'str', default = 'system:openshift-client'), # TODO: needs documented
-            kubectl_cmd      = dict(type = 'list', default = ['kubectl']) # TODO: needs documented
+            kubectl_cmd      = dict(type = 'list', default = ['kubectl']), # TODO: needs documented
+            kubeconfig_flag  = dict(type = 'str'), # TODO: needs documented
+            default_client_config = dict(type = 'str') # TODO: needs documented
         ),
         mutually_exclusive = [
             ['host_ip', 'external_ips'],
@@ -303,7 +305,8 @@ def main():
         supports_check_mode=True
     )
 
-    user_has_client_config = os.path.exists(os.path.expanduser('~/.kube/.kubeconfig'))
+    client_config = module.params['default_client_config'] if 'default_client_config' in module.params else '~/.kube/.kubeconfig'
+    user_has_client_config = os.path.exists(os.path.expanduser(client_config))
     if not (user_has_client_config or module.params['client_config']):
         module.fail_json(msg="Could not locate client configuration, "
                          "client_config must be specified if "
@@ -311,12 +314,13 @@ def main():
 
     client_opts = []
     if module.params['client_config']:
-        client_opts.append("--kubeconfig=%s" % module.params['client_config'])
+        kubeconfig_flag = '--kubeconfig' if not module.params['kubeconfig_flag'] else module.params['kubeconfig_flag']
+        client_opts.append("%s=%s" % (kubeconfig_flag, os.path.expanduser(module.params['client_config'])))
 
     try:
         config = ClientConfig(client_opts, module)
     except ClientConfigException as e:
-        module.fail_json(msg="Failed to get client configuration", exception=e)
+        module.fail_json(msg="Failed to get client configuration", exception=str(e))
 
     client_context = module.params['client_context']
     if config.has_context(client_context):

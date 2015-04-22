@@ -1,12 +1,11 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 # vim: expandtab:tabstop=4:shiftwidth=4
+# pylint: disable=fixme, missing-docstring, too-many-arguments
+# pylint: disable=too-many-locals, too-many-branches, too-few-public-methods
+# pylint: disable=no-self-use
 
 import os
-import multiprocessing
-import socket
-from subprocess import check_output, Popen
-from decimal import *
 
 DOCUMENTATION = '''
 ---
@@ -95,10 +94,12 @@ EXAMPLES = '''
 class ClientConfigException(Exception):
     pass
 
-class ClientConfig:
+class ClientConfig(object):
     def __init__(self, client_opts, module):
         kubectl = module.params['kubectl_cmd']
-        _, output, error = module.run_command(kubectl + ["config", "view", "-o", "json"] + client_opts, check_rc = True)
+        _, output, _ = module.run_command((kubectl +
+                                           ["config", "view", "-o", "json"] +
+                                           client_opts), check_rc=True)
         self.config = json.loads(output)
 
         if not (bool(self.config['clusters']) or
@@ -106,7 +107,7 @@ class ClientConfig:
                 bool(self.config['current-context']) or
                 bool(self.config['users'])):
             raise ClientConfigException(
-                    "Client config missing required values: %s" % output
+                "Client config missing required values: %s" % output
             )
 
     def current_context(self):
@@ -118,7 +119,7 @@ class ClientConfig:
             return value in section
         else:
             val = next((item for item in section
-                      if item['name'] == value), None)
+                        if item['name'] == value), None)
             return val is not None
 
     def has_context(self, context):
@@ -136,7 +137,7 @@ class ClientConfig:
             return contexts[context][attribute]
         else:
             return next((c['context'][attribute] for c in contexts
-                      if c['name'] == context), None)
+                         if c['name'] == context), None)
 
     def get_user_for_context(self, context):
         return self.get_value_for_context(context, 'user')
@@ -147,19 +148,19 @@ class ClientConfig:
     def get_namespace_for_context(self, context):
         return self.get_value_for_context(context, 'namespace')
 
-class Util:
+class Util(object):
     @staticmethod
     def remove_empty_elements(mapping):
         if isinstance(mapping, dict):
-            m = mapping.copy()
+            copy = mapping.copy()
             for key, val in mapping.iteritems():
                 if not val:
-                    del m[key]
-            return m
+                    del copy[key]
+            return copy
         else:
             return mapping
 
-class NodeResources:
+class NodeResources(object):
     def __init__(self, version, cpu=None, memory=None):
         if version == 'v1beta1':
             self.resources = dict(capacity=dict())
@@ -169,8 +170,9 @@ class NodeResources:
     def get_resources(self):
         return Util.remove_empty_elements(self.resources)
 
-class NodeSpec:
-    def __init__(self, version, cpu=None, memory=None, cidr=None, externalID=None):
+class NodeSpec(object):
+    def __init__(self, version, cpu=None, memory=None, cidr=None,
+                 externalID=None):
         if version == 'v1beta3':
             self.spec = dict(podCIDR=cidr, externalID=externalID,
                              capacity=dict())
@@ -180,57 +182,57 @@ class NodeSpec:
     def get_spec(self):
         return Util.remove_empty_elements(self.spec)
 
-class NodeStatus:
-    def addAddresses(self, addressType, addresses):
-        addressList = []
+class NodeStatus(object):
+    def add_addresses(self, address_type, addresses):
+        address_list = []
         for address in addresses:
-            addressList.append(dict(type=addressType, address=address))
-        return addressList
+            address_list.append(dict(type=address_type, address=address))
+        return address_list
 
-    def __init__(self, version, externalIPs = [], internalIPs = [],
-                 hostnames = []):
+    def __init__(self, version, externalIPs=None, internalIPs=None,
+                 hostnames=None):
         if version == 'v1beta3':
-            self.status = dict(addresses = addAddresses('ExternalIP',
-                                                        externalIPs) +
-                                           addAddresses('InternalIP',
-                                                        internalIPs) +
-                                           addAddresses('Hostname',
-                                                        hostnames))
+            addresses = []
+            if externalIPs is not None:
+                addresses += self.add_addresses('ExternalIP', externalIPs)
+            if internalIPs is not None:
+                addresses += self.add_addresses('InternalIP', internalIPs)
+            if hostnames is not None:
+                addresses += self.add_addresses('Hostname', hostnames)
+
+            self.status = dict(addresses=addresses)
 
     def get_status(self):
         return Util.remove_empty_elements(self.status)
 
-class Node:
-    def __init__(self, module, client_opts, version='v1beta1', name=None,
-                 hostIP = None, hostnames=[], externalIPs=[], internalIPs=[],
-                 cpu=None, memory=None, labels=dict(), annotations=dict(),
-                 podCIDR=None, externalID=None):
+class Node(object):
+    def __init__(self, module, client_opts, version='v1beta1', node_name=None,
+                 hostIP=None, hostnames=None, externalIPs=None,
+                 internalIPs=None, cpu=None, memory=None, labels=None,
+                 annotations=None, podCIDR=None, externalID=None):
         self.module = module
         self.client_opts = client_opts
         if version == 'v1beta1':
-            self.node = dict(id = name,
-                             kind = 'Node',
-                             apiVersion = version,
-                             hostIP = hostIP,
-                             resources = NodeResources(version, cpu, memory),
-                             cidr = podCIDR,
-                             labels = labels,
-                             annotations = annotations,
-                             externalID = externalID
-                        )
+            self.node = dict(id=node_name,
+                             kind='Node',
+                             apiVersion=version,
+                             hostIP=hostIP,
+                             resources=NodeResources(version, cpu, memory),
+                             cidr=podCIDR,
+                             labels=labels,
+                             annotations=annotations,
+                             externalID=externalID)
         elif version == 'v1beta3':
-            metadata = dict(name = name,
-                            labels = labels,
-                            annotations = annotations
-                        )
-            self.node = dict(kind = 'Node',
-                             apiVersion = version,
-                             metadata = metadata,
-                             spec = NodeSpec(version, cpu, memory, podCIDR,
-                                             externalID),
-                             status = NodeStatus(version, externalIPs,
-                                                 internalIPs, hostnames),
-                        )
+            metadata = dict(name=node_name,
+                            labels=labels,
+                            annotations=annotations)
+            self.node = dict(kind='Node',
+                             apiVersion=version,
+                             metadata=metadata,
+                             spec=NodeSpec(version, cpu, memory, podCIDR,
+                                           externalID),
+                             status=NodeStatus(version, externalIPs,
+                                               internalIPs, hostnames))
 
     def get_name(self):
         if self.node['apiVersion'] == 'v1beta1':
@@ -249,7 +251,9 @@ class Node:
 
     def exists(self):
         kubectl = self.module.params['kubectl_cmd']
-        _, output, error = self.module.run_command(kubectl + ["get", "nodes"] +  self.client_opts, check_rc = True)
+        _, output, _ = self.module.run_command((kubectl + ["get", "nodes"] +
+                                                self.client_opts),
+                                               check_rc=True)
         if re.search(self.module.params['name'], output, re.MULTILINE):
             return True
         return False
@@ -257,47 +261,60 @@ class Node:
     def create(self):
         kubectl = self.module.params['kubectl_cmd']
         cmd = kubectl + self.client_opts + ['create', '-f', '-']
-        rc, output, error = self.module.run_command(cmd,
-                                               data=self.module.jsonify(self.get_node()))
-        if rc != 0:
+        exit_code, output, error = self.module.run_command(
+            cmd, data=self.module.jsonify(self.get_node())
+        )
+        if exit_code != 0:
             if re.search("minion \"%s\" already exists" % self.get_name(),
                          error):
-                self.module.exit_json(changed=False,
-                                 msg="node definition already exists",
-                                 node=self.get_node())
+                self.module.exit_json(msg="node definition already exists",
+                                      changed=False, node=self.get_node())
             else:
-                self.module.fail_json(msg="Node creation failed.", rc=rc,
-                                 output=output, error=error,
-                                 node=self.get_node())
+                self.module.fail_json(msg="Node creation failed.",
+                                      exit_code=exit_code,
+                                      output=output, error=error,
+                                      node=self.get_node())
         else:
             return True
 
 def main():
     module = AnsibleModule(
-        argument_spec        = dict(
-            name             = dict(required = True, type = 'str'),
-            host_ip          = dict(type = 'str'),
-            hostnames        = dict(type = 'list', default = []),
-            external_ips     = dict(type = 'list', default = []),
-            internal_ips     = dict(type = 'list', default = []),
-            api_version      = dict(type = 'str', default = 'v1beta1', # TODO: after kube rebase, we can default to v1beta3
-                                    choices = ['v1beta1', 'v1beta3']),
-            cpu              = dict(type = 'str'),
-            memory           = dict(type = 'str'),
-            labels           = dict(type = 'dict', default = {}), # TODO: needs documented
-            annotations      = dict(type = 'dict', default = {}), # TODO: needs documented
-            pod_cidr         = dict(type = 'str'), # TODO: needs documented
-            external_id      = dict(type = 'str'), # TODO: needs documented
-            client_config    = dict(type = 'str'), # TODO: needs documented
-            client_cluster   = dict(type = 'str', default = 'master'), # TODO: needs documented
-            client_context   = dict(type = 'str', default = 'default'), # TODO: needs documented
-            client_namespace = dict(type = 'str', default = 'default'), # TODO: needs documented
-            client_user      = dict(type = 'str', default = 'system:openshift-client'), # TODO: needs documented
-            kubectl_cmd      = dict(type = 'list', default = ['kubectl']), # TODO: needs documented
-            kubeconfig_flag  = dict(type = 'str'), # TODO: needs documented
-            default_client_config = dict(type = 'str') # TODO: needs documented
+        argument_spec=dict(
+            name=dict(required=True, type='str'),
+            host_ip=dict(type='str'),
+            hostnames=dict(type='list', default=[]),
+            external_ips=dict(type='list', default=[]),
+            internal_ips=dict(type='list', default=[]),
+            api_version=dict(type='str', default='v1beta1',
+                             choices=['v1beta1', 'v1beta3']),
+            cpu=dict(type='str'),
+            memory=dict(type='str'),
+            # TODO: needs documented
+            labels=dict(type='dict', default={}),
+            # TODO: needs documented
+            annotations=dict(type='dict', default={}),
+            # TODO: needs documented
+            pod_cidr=dict(type='str'),
+            # TODO: needs documented
+            external_id=dict(type='str'),
+            # TODO: needs documented
+            client_config=dict(type='str'),
+            # TODO: needs documented
+            client_cluster=dict(type='str', default='master'),
+            # TODO: needs documented
+            client_context=dict(type='str', default='default'),
+            # TODO: needs documented
+            client_namespace=dict(type='str', default='default'),
+            # TODO: needs documented
+            client_user=dict(type='str', default='system:openshift-client'),
+            # TODO: needs documented
+            kubectl_cmd=dict(type='list', default=['kubectl']),
+            # TODO: needs documented
+            kubeconfig_flag=dict(type='str'),
+            # TODO: needs documented
+            default_client_config=dict(type='str')
         ),
-        mutually_exclusive = [
+        mutually_exclusive=[
             ['host_ip', 'external_ips'],
             ['host_ip', 'internal_ips'],
             ['host_ip', 'hostnames'],
@@ -305,7 +322,9 @@ def main():
         supports_check_mode=True
     )
 
-    client_config = module.params['default_client_config'] if 'default_client_config' in module.params else '~/.kube/.kubeconfig'
+    client_config = '~/.kube/.kubeconfig'
+    if 'default_client_config' in module.params:
+        client_config = module.params['default_client_config']
     user_has_client_config = os.path.exists(os.path.expanduser(client_config))
     if not (user_has_client_config or module.params['client_config']):
         module.fail_json(msg="Could not locate client configuration, "
@@ -314,13 +333,17 @@ def main():
 
     client_opts = []
     if module.params['client_config']:
-        kubeconfig_flag = '--kubeconfig' if not module.params['kubeconfig_flag'] else module.params['kubeconfig_flag']
-        client_opts.append("%s=%s" % (kubeconfig_flag, os.path.expanduser(module.params['client_config'])))
+        kubeconfig_flag = '--kubeconfig'
+        if 'kubeconfig_flag' in module.params:
+            kubeconfig_flag = module.params['kubeconfig_flag']
+        client_opts.append(kubeconfig_flag + '=' +
+                           os.path.expanduser(module.params['client_config']))
 
     try:
         config = ClientConfig(client_opts, module)
-    except ClientConfigException as e:
-        module.fail_json(msg="Failed to get client configuration", exception=str(e))
+    except ClientConfigException as ex:
+        module.fail_json(msg="Failed to get client configuration",
+                         exception=str(ex))
 
     client_context = module.params['client_context']
     if config.has_context(client_context):
@@ -373,7 +396,7 @@ def main():
             module.fail_json(msg="Unknown error creating node",
                              node=node.get_node())
 
-
+# pylint: disable=redefined-builtin, unused-wildcard-import, wildcard-import
 # import module snippets
 from ansible.module_utils.basic import *
 if __name__ == '__main__':

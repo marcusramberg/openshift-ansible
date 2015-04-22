@@ -1,14 +1,14 @@
 #!/usr/bin/python
 # -*- coding: utf-8 -*-
 # vim: expandtab:tabstop=4:shiftwidth=4
+# pylint: disable=missing-docstring, no-self-use, too-few-public-methods
 
-from ansible import errors, runner
-import json
+from ansible import errors
 import pdb
-import re
 
 def oo_pdb(arg):
-    ''' This pops you into a pdb instance where arg is the data passed in from the filter.
+    ''' This pops you into a pdb instance where arg is the data passed in
+        from the filter.
         Ex: "{{ hostvars | oo_pdb }}"
     '''
     pdb.set_trace()
@@ -21,7 +21,8 @@ def oo_len(arg):
     return len(arg)
 
 def get_attr(data, attribute=None):
-    ''' This looks up dictionary attributes of the form a.b.c and returns the value.
+    ''' This looks up dictionary attributes of the form a.b.c and returns
+        the value.
         Ex: data = {'a': {'b': {'c': 5}}}
             attribute = "a.b.c"
             returns 5
@@ -41,12 +42,13 @@ def oo_flatten(data):
     if not issubclass(type(data), list):
         raise errors.AnsibleFilterError("|failed expects to flatten a List")
 
-    return [ item for sublist in data for item in sublist ]
+    return [item for sublist in data for item in sublist]
 
 
-def oo_collect(data, attribute=None, filters={}):
-    ''' This takes a list of dict and collects all attributes specified into a list
-        If filter is specified then we will include all items that match _ALL_ of filters.
+def oo_collect(data, attribute=None, filters=None):
+    ''' This takes a list of dict and collects all attributes specified into a
+        list If filter is specified then we will include all items that match
+        _ALL_ of filters.
         Ex: data = [ {'a':1, 'b':5, 'z': 'z'}, # True, return
                      {'a':2, 'z': 'z'},        # True, return
                      {'a':3, 'z': 'z'},        # True, return
@@ -63,8 +65,12 @@ def oo_collect(data, attribute=None, filters={}):
     if not attribute:
         raise errors.AnsibleFilterError("|failed expects attribute to be set")
 
-    if filters:
-        retval = [get_attr(d, attribute) for d in data if all([ d[key] == filters[key] for key in filters ]) ]
+    if filters is not None:
+        if not issubclass(type(filters), dict):
+            raise errors.AnsibleFilterError("|failed expects filter to be a"
+                                            "dict")
+        retval = [get_attr(d, attribute) for d in data if (
+            all([d[key] == filters[key] for key in filters]))]
     else:
         retval = [get_attr(d, attribute) for d in data]
 
@@ -78,7 +84,7 @@ def oo_select_keys(data, keys):
     '''
 
     if not issubclass(type(data), dict):
-        raise errors.AnsibleFilterError("|failed expects to filter on a Dictionary")
+        raise errors.AnsibleFilterError("|failed expects to filter on a dict")
 
     if not issubclass(type(keys), list):
         raise errors.AnsibleFilterError("|failed expects first param is a list")
@@ -98,30 +104,66 @@ def oo_prepend_strings_in_list(data, prepend):
     if not issubclass(type(data), list):
         raise errors.AnsibleFilterError("|failed expects first param is a list")
     if not all(isinstance(x, basestring) for x in data):
-        raise errors.AnsibleFilterError("|failed expects first param is a list of strings")
+        raise errors.AnsibleFilterError("|failed expects first param is a list"
+                                        "of strings")
     retval = [prepend + s for s in data]
     return retval
 
-def oo_get_deployment_type_from_groups(data):
-    ''' This takes a list of groups and returns the associated
-        deployment-type
+def oo_ec2_volume_definition(data, host_type, docker_ephemeral=False):
+    ''' This takes a dictionary of volume definitions and returns a valid ec2
+        volume definition based on the host_type and the values in the
+        dictionary.
+        The dictionary should look similar to this:
+            { 'master':
+                { 'root':
+                    { 'volume_size': 10, 'device_type': 'gp2',
+                      'iops': 500
+                    }
+                },
+              'node':
+                { 'root':
+                    { 'volume_size': 10, 'device_type': 'io1',
+                      'iops': 1000
+                    },
+                  'docker':
+                    { 'volume_size': 40, 'device_type': 'gp2',
+                      'iops': 500, 'ephemeral': 'true'
+                    }
+                }
+            }
     '''
-    if not issubclass(type(data), list):
-        raise errors.AnsibleFilterError("|failed expects first param is a list")
-    regexp = re.compile('^tag_deployment-type[-_]')
-    matches = filter(regexp.match, data)
-    if len(matches) > 0:
-        return regexp.sub('', matches[0])
-    return "Unknown"
+    if not issubclass(type(data), dict):
+        raise errors.AnsibleFilterError("|failed expects first param is a dict")
+    if host_type not in ['master', 'node']:
+        raise errors.AnsibleFilterError("|failed expects either master or node"
+                                        " host type")
 
-class FilterModule (object):
+    root_vol = data[host_type]['root']
+    root_vol['device_name'] = '/dev/sda1'
+    root_vol['delete_on_termination'] = True
+    if root_vol['device_type'] != 'io1':
+        root_vol.pop('iops', None)
+    if host_type == 'node':
+        docker_vol = data[host_type]['docker']
+        docker_vol['device_name'] = '/dev/xvdb'
+        docker_vol['delete_on_termination'] = True
+        if docker_vol['device_type'] != 'io1':
+            docker_vol.pop('iops', None)
+        if docker_ephemeral:
+            docker_vol.pop('device_type', None)
+            docker_vol.pop('delete_on_termination', None)
+            docker_vol['ephemeral'] = 'ephemeral0'
+        return [root_vol, docker_vol]
+    return [root_vol]
+
+class FilterModule(object):
     def filters(self):
         return {
-                "oo_select_keys": oo_select_keys,
-                "oo_collect": oo_collect,
-                "oo_flatten": oo_flatten,
-                "oo_len": oo_len,
-                "oo_pdb": oo_pdb,
-                "oo_prepend_strings_in_list": oo_prepend_strings_in_list,
-                "oo_get_deployment_type_from_groups": oo_get_deployment_type_from_groups
-                }
+            "oo_select_keys": oo_select_keys,
+            "oo_collect": oo_collect,
+            "oo_flatten": oo_flatten,
+            "oo_len": oo_len,
+            "oo_pdb": oo_pdb,
+            "oo_prepend_strings_in_list": oo_prepend_strings_in_list,
+            "oo_ec2_volume_definition": oo_ec2_volume_definition
+        }

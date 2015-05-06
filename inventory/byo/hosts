@@ -32,5 +32,5 @@ ose3-master-ansible.test.example.com
 
 # host group for nodes
 [nodes]
-ose3-master-ansible.test.example.com openshift_node_labels="{'region': 'infra', 'zone': 'default'}"
-ose3-node[1:2]-ansible.test.example.com openshift_node_labels="{'region': 'primary', 'zone': 'default'}"
+ose3-master-ansible.test.example.com
+ose3-node[1:2]-ansible.test.example.com
